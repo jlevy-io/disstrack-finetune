@@ -2,7 +2,7 @@
 set -e
 
 echo "=========================================="
-echo "🔥 DissTrack H100 - High-Rank LoRA (128)"
+echo "🔥 DissTrack H100 - LoRA-128 (Memory Optimized)"
 echo "=========================================="
 echo ""
 
@@ -15,9 +15,9 @@ DATA_PATH="data/llava_format/train.json"
 IMAGE_FOLDER="data/raw/images"
 OUTPUT_DIR="outputs/qwen2.5-vl-roastme-v4-h100-lora128"
 
-# Image resolution (high quality for H100)
-MIN_PIXELS=$((512 * 28 * 28))
-MAX_PIXELS=$((1536 * 28 * 28))
+# Image resolution - LOWERED to fit in memory with vision training
+MIN_PIXELS=$((256 * 28 * 28))    # 200K tokens (balanced for memory)
+MAX_PIXELS=$((768 * 28 * 28))    # 602K tokens (still good quality)
 
 # ==========================================
 # Setup Environment
@@ -35,8 +35,10 @@ echo "     LLM: Frozen + LoRA adapters (rank 128 = 4x capacity)"
 echo "     Vision: FULL training (learns facial features)"
 echo "     Merger: FULL training (visual grounding!)"
 echo ""
+echo "   Image Resolution: 256-768 tokens (optimized for memory)"
+echo ""
 echo "   Performance:"
-echo "     Memory: ~35-40GB (fits comfortably)"
+echo "     Memory: ~30-35GB (comfortable fit)"
 echo "     Time: ~12-15 minutes"
 echo "     Cost: ~$0.67"
 echo ""
