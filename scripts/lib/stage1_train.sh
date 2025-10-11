@@ -3,6 +3,178 @@
 
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
+# ==========================================
+# Helper Functions (Define First)
+# ==========================================
+
+merge_stage1_checkpoint() {
+    local checkpoint=$1
+    local output=$2
+    
+    log_section "🔧 Merging Stage 1 LoRA Weights"
+    
+    echo "Stage 2 requires a merged model (LoRA + base weights combined)." >&2
+    echo "" >&2
+    echo "Source checkpoint: $(basename $checkpoint)" >&2
+    echo "Output merged model: $(basename $output)" >&2
+    echo "" >&2
+    echo "This will take ~2 minutes and use ~15GB disk space..." >&2
+    echo "" >&2
+    
+    if merge_lora_weights "$checkpoint" "$output"; then
+        echo "" >&2
+        log_success "Merge complete: $output"
+        return 0
+    else
+        echo "" >&2
+        log_error "Merge failed!"
+        echo "" >&2
+        echo "Stage 2 cannot proceed without a merged model." >&2
+        echo "Possible causes:" >&2
+        echo "  - Insufficient disk space (~15GB needed)" >&2
+        echo "  - Corrupted checkpoint" >&2
+        echo "  - Missing dependencies" >&2
+        echo "" >&2
+        return 1
+    fi
+}
+
+train_stage1() {
+    local status=$1
+    local resume_from=$2
+    
+    log_section "🚀 STAGE 1: Training Merger + LoRA"
+    
+    echo "Configuration:" >&2
+    echo "   Vision Tower: FROZEN" >&2
+    echo "   LLM: FROZEN + LoRA (rank 128)" >&2
+    echo "   Merger: TRAINING" >&2
+    echo "   Batch Size: 4" >&2
+    echo "   Epochs: 3" >&2
+    echo "" >&2
+    
+    if [ "$status" = "incomplete" ]; then
+        echo "Resuming from: $resume_from" >&2
+        local ckpt_num=$(basename $resume_from | sed 's/checkpoint-//')
+        local remaining=$((132 - ckpt_num))
+        echo "Progress: $(basename $resume_from)" >&2
+        echo "Remaining steps: ~$remaining" >&2
+        echo "Estimated time: ~$((remaining * 3 / 60)) minutes" >&2
+    else
+        echo "Starting fresh training" >&2
+        echo "Total steps: ~132" >&2
+        echo "Estimated time: ~8-10 minutes" >&2
+    fi
+    
+    echo "" >&2
+    read -p "Press Enter to continue..." >&2
+    echo "" >&2
+    
+    # Build training command
+    local cmd="deepspeed src/train/train_sft.py \
+        --deepspeed scripts/zero2.json \
+        --model_id $BASE_MODEL \
+        --data_path $DATA_PATH \
+        --image_folder $IMAGE_FOLDER \
+        --output_dir $STAGE1_DIR \
+        --num_train_epochs 3 \
+        --per_device_train_batch_size 4 \
+        --gradient_accumulation_steps 4 \
+        --freeze_vision_tower True \
+        --freeze_llm True \
+        --freeze_merger False \
+        --learning_rate 1e-4 \
+        --merger_lr 5e-5 \
+        --image_min_pixels $((256 * 28 * 28)) \
+        --image_max_pixels $((768 * 28 * 28)) \
+        --bf16 True \
+        --use_liger True \
+        --lora_enable True \
+        --lora_rank 128 \
+        --lora_alpha 256 \
+        --lora_dropout 0.05 \
+        --gradient_checkpointing True \
+        --max_seq_length 2048 \
+        --dataloader_num_workers 4 \
+        --logging_steps 5 \
+        --save_strategy steps \
+        --save_steps 50 \
+        --save_total_limit 2 \
+        --report_to tensorboard \
+        --logging_dir $STAGE1_DIR/logs"
+    
+    # Add resume checkpoint if resuming
+    if [ "$status" = "incomplete" ] && [ -n "$resume_from" ]; then
+        cmd="$cmd --resume_from_checkpoint $resume_from"
+    fi
+    
+    # Run training
+    eval $cmd
+    local exit_code=$?
+    
+    if [ $exit_code -ne 0 ]; then
+        echo "" >&2
+        log_section "❌ STAGE 1 FAILED"
+        echo "Exit code: $exit_code" >&2
+        echo "" >&2
+        echo "Training was interrupted or failed." >&2
+        echo "You can resume by running this script again." >&2
+        echo "" >&2
+        exit $exit_code
+    fi
+    
+    # Training succeeded - clean up and merge
+    echo "" >&2
+    log_section "✅ STAGE 1 TRAINING COMPLETE!"
+    
+    clean_corrupted_checkpoints "$STAGE1_DIR"
+    
+    # Find the best checkpoint
+    local final_ckpt=""
+    for ckpt in $(find $STAGE1_DIR -maxdepth 1 -type d -name "checkpoint-*" | sort -V -r); do
+        if validate_checkpoint "$ckpt" 2>/dev/null; then
+            final_ckpt="$ckpt"
+            break
+        fi
+    done
+    
+    if [ -z "$final_ckpt" ]; then
+        log_error "No valid checkpoint found after training!"
+        echo "This should not happen. Check $STAGE1_DIR" >&2
+        exit 1
+    fi
+    
+    echo "📁 Final checkpoint: $final_ckpt" >&2
+    echo "" >&2
+    
+    # Merge LoRA weights (REQUIRED for Stage 2)
+    local merged="${STAGE1_DIR}-merged"
+    
+    if [ ! -d "$merged" ]; then
+        if ! merge_stage1_checkpoint "$final_ckpt" "$merged"; then
+            echo "" >&2
+            log_error "Cannot proceed to Stage 2 without merged model"
+            exit 1
+        fi
+    else
+        log_info "Merged model already exists: $merged"
+    fi
+    
+    # Mark Stage 1 as complete
+    touch "$STAGE1_COMPLETE_MARKER"
+    
+    echo "" >&2
+    clear_gpu_memory
+    
+    # Return merged model path for Stage 2
+    echo "$merged"
+    return 0
+}
+
+# ==========================================
+# Main Function
+# ==========================================
+
 run_stage1() {
     log_section "🔍 Checking Stage 1 Status"
     
@@ -130,113 +302,5 @@ run_stage1() {
         local merged_path=$(train_stage1 "$status" "$resume_from")
         echo "$merged_path"
         return 0
-    fi
-}
-
-
-train_stage1() {
-    local status=$1
-    local resume_from=$2
-    
-    log_section "🚀 STAGE 1: Training Merger + LoRA"
-    
-    if [ "$status" = "incomplete" ]; then
-        echo "Resuming from: $resume_from"
-        local ckpt_num=$(basename $resume_from | sed 's/checkpoint-//')
-        echo "Remaining steps: ~$((132 - ckpt_num))"
-    fi
-    
-    echo ""
-    echo "Configuration:"
-    echo "   Vision Tower: FROZEN"
-    echo "   LLM: FROZEN + LoRA (rank 128)"
-    echo "   Merger: TRAINING"
-    echo "   Batch Size: 4"
-    echo "   Epochs: 3"
-    echo ""
-    
-    read -p "Press Enter to continue..."
-    echo ""
-    
-    # Build command
-    local cmd="deepspeed src/train/train_sft.py \
-        --deepspeed scripts/zero2.json \
-        --model_id $BASE_MODEL \
-        --data_path $DATA_PATH \
-        --image_folder $IMAGE_FOLDER \
-        --output_dir $STAGE1_DIR \
-        --num_train_epochs 3 \
-        --per_device_train_batch_size 4 \
-        --gradient_accumulation_steps 4 \
-        --freeze_vision_tower True \
-        --freeze_llm True \
-        --freeze_merger False \
-        --learning_rate 1e-4 \
-        --merger_lr 5e-5 \
-        --image_min_pixels $((256 * 28 * 28)) \
-        --image_max_pixels $((768 * 28 * 28)) \
-        --bf16 True \
-        --use_liger True \
-        --lora_enable True \
-        --lora_rank 128 \
-        --lora_alpha 256 \
-        --lora_dropout 0.05 \
-        --gradient_checkpointing True \
-        --max_seq_length 2048 \
-        --dataloader_num_workers 4 \
-        --logging_steps 5 \
-        --save_strategy steps \
-        --save_steps 50 \
-        --save_total_limit 2 \
-        --report_to tensorboard \
-        --logging_dir $STAGE1_DIR/logs"
-    
-    # Add resume if needed
-    if [ "$status" = "incomplete" ] && [ -n "$resume_from" ]; then
-        cmd="$cmd --resume_from_checkpoint $resume_from"
-    fi
-    
-    # Run training
-    eval $cmd
-    local exit_code=$?
-    
-    if [ $exit_code -eq 0 ]; then
-        clean_corrupted_checkpoints "$STAGE1_DIR"
-        
-        # Find final checkpoint
-        local final_ckpt=""
-        for ckpt in $(find $STAGE1_DIR -maxdepth 1 -type d -name "checkpoint-*" | sort -V -r); do
-            if validate_checkpoint "$ckpt" 2>/dev/null; then
-                final_ckpt="$ckpt"
-                break
-            fi
-        done
-        [ -z "$final_ckpt" ] && final_ckpt="$STAGE1_DIR"
-        
-        log_section "✅ STAGE 1 COMPLETE!"
-        echo "📁 Stage 1 checkpoint: $final_ckpt"
-        echo ""
-        
-        # Merge for Stage 2
-        local merged="${STAGE1_DIR}-merged"
-        if [ ! -d "$merged" ]; then
-            echo "🔧 Merging Stage 1 for Stage 2..."
-            echo ""
-            
-            if merge_lora_weights "$final_ckpt" "$merged"; then
-                log_success "Stage 1 merged: $merged"
-            else
-                log_warning "Merge failed, will use checkpoint directly"
-            fi
-        fi
-        
-        touch "$STAGE1_COMPLETE_MARKER"
-        clear_gpu_memory
-        
-        return 0
-    else
-        log_section "❌ STAGE 1 FAILED"
-        echo "Exit code: $exit_code"
-        exit $exit_code
     fi
 }
