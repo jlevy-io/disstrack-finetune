@@ -14,24 +14,38 @@ run_stage1() {
         status="complete"
         log_success "Stage 1: COMPLETE"
         
-        # Find checkpoint
-        if [ -d "$STAGE1_DIR/checkpoint-100" ]; then
-            resume_from="$STAGE1_DIR/checkpoint-100"
-        else
-            resume_from=$(find $STAGE1_DIR -maxdepth 1 -type d -name "checkpoint-*" | sort -V | tail -1)
-            [ -z "$resume_from" ] && resume_from="$STAGE1_DIR"
-        fi
-        
-        echo "   Using checkpoint: $(basename $resume_from)"
-        
-        # Check if merged version exists
+        # Always use merged version for Stage 2
         local merged="${STAGE1_DIR}-merged"
+        
         if [ -d "$merged" ]; then
+            echo "   Using merged model: $(basename $merged)" >&2
             echo "$merged"
             return 0
         else
-            echo "$resume_from"
-            return 0
+            log_warning "Stage 1 complete but merged model not found!"
+            echo "   Will attempt to merge existing checkpoint..." >&2
+            echo "" >&2
+            
+            # Find the checkpoint to merge
+            local checkpoint=""
+            if [ -d "$STAGE1_DIR/checkpoint-100" ]; then
+                checkpoint="$STAGE1_DIR/checkpoint-100"
+            else
+                checkpoint=$(find $STAGE1_DIR -maxdepth 1 -type d -name "checkpoint-*" | sort -V -r | head -1)
+            fi
+            
+            if [ -n "$checkpoint" ] && [ -d "$checkpoint" ]; then
+                if merge_stage1_checkpoint "$checkpoint" "$merged"; then
+                    echo "$merged"
+                    return 0
+                else
+                    log_error "Cannot create merged model for Stage 2"
+                    exit 1
+                fi
+            else
+                log_error "No valid checkpoint found to merge"
+                exit 1
+            fi
         fi
     fi
     
@@ -39,39 +53,44 @@ run_stage1() {
     if [ -d "$STAGE1_DIR" ]; then
         status="incomplete"
         log_warning "Stage 1: INCOMPLETE"
-        echo ""
+        echo "" >&2
         
         clean_corrupted_checkpoints "$STAGE1_DIR"
+        
+        echo "Checking for valid checkpoints..." >&2
+        echo "" >&2
         
         # Find valid checkpoints
         local valid_checkpoints=()
         for ckpt in $(find $STAGE1_DIR -maxdepth 1 -type d -name "checkpoint-*" | sort -V -r); do
+            ckpt_name=$(basename $ckpt)
             if validate_checkpoint "$ckpt" 2>/dev/null; then
-                log_success "$(basename $ckpt): Valid"
+                log_success "$ckpt_name: Valid"
                 valid_checkpoints+=("$ckpt")
             fi
         done
         
-        echo ""
+        echo "" >&2
         
         if [ ${#valid_checkpoints[@]} -eq 0 ]; then
             log_error "No valid checkpoints found!"
+            log_info "Stage 1 must be restarted from scratch."
             status="not_started"
         else
             resume_from="${valid_checkpoints[0]}"
             local ckpt_num=$(basename $resume_from | sed 's/checkpoint-//')
             
-            echo "Found ${#valid_checkpoints[@]} valid checkpoint(s)"
-            echo "Latest valid: $(basename $resume_from)"
-            echo "Progress: ~$((ckpt_num * 100 / 132))% complete"
-            echo ""
-            echo "Options:"
-            echo "  [1] Resume from $(basename $resume_from) (recommended)"
-            echo "  [2] Start Stage 1 from scratch"
-            echo "  [3] Cancel"
-            echo ""
+            echo "Found ${#valid_checkpoints[@]} valid checkpoint(s)" >&2
+            echo "Latest valid: $(basename $resume_from)" >&2
+            echo "Progress: ~$((ckpt_num * 100 / 132))% complete" >&2
+            echo "" >&2
+            echo "Options:" >&2
+            echo "  [1] Resume from $(basename $resume_from) (recommended)" >&2
+            echo "  [2] Start Stage 1 from scratch" >&2
+            echo "  [3] Cancel" >&2
+            echo "" >&2
             read -p "Choose option (1/2/3): " -n 1 -r
-            echo ""
+            echo "" >&2
             
             case $REPLY in
                 1)
@@ -79,11 +98,19 @@ run_stage1() {
                     ;;
                 2)
                     log_warning "Starting from scratch"
-                    rm -rf "$STAGE1_DIR"
-                    status="not_started"
-                    resume_from=""
+                    read -p "This will delete existing progress. Confirm? (yes/no): " confirm
+                    echo "" >&2
+                    if [ "$confirm" = "yes" ]; then
+                        rm -rf "$STAGE1_DIR"
+                        status="not_started"
+                        resume_from=""
+                    else
+                        echo "Cancelled." >&2
+                        exit 0
+                    fi
                     ;;
                 3)
+                    echo "Cancelled." >&2
                     exit 0
                     ;;
                 *)
@@ -96,22 +123,16 @@ run_stage1() {
         log_info "Stage 1: NOT STARTED"
     fi
     
-    echo ""
+    echo "" >&2
     
     # Run training if needed
     if [ "$status" != "complete" ]; then
-        train_stage1 "$status" "$resume_from"
-    fi
-    
-    # Return the path to use for Stage 2
-    if [ -d "${STAGE1_DIR}-merged" ]; then
-        echo "${STAGE1_DIR}-merged"
-    else
-        local final=$(find $STAGE1_DIR -maxdepth 1 -type d -name "checkpoint-*" | sort -V | tail -1)
-        [ -z "$final" ] && final="$STAGE1_DIR"
-        echo "$final"
+        local merged_path=$(train_stage1 "$status" "$resume_from")
+        echo "$merged_path"
+        return 0
     fi
 }
+
 
 train_stage1() {
     local status=$1
