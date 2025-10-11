@@ -2,7 +2,7 @@
 set -e
 
 echo "=========================================="
-echo "🔥 DissTrack H100 SXM Training (Fixed)"
+echo "🔥 DissTrack H100 SXM Training (Final)"
 echo "=========================================="
 echo ""
 
@@ -17,15 +17,16 @@ MAX_PIXELS=$((1536 * 28 * 28))
 export PYTHONPATH=src:$PYTHONPATH
 unset LD_LIBRARY_PATH
 
-# Kill any lingering processes
+# Kill lingering processes
 pkill -9 python || true
-sleep 2
+sleep 3
 
 echo "📊 Training Configuration:"
 echo "   Hardware: H100 SXM 80GB"
-echo "   Strategy: FULL FINE-TUNING"
-echo "   Batch Size: 4 (reduced from 6 to fit in memory)"
+echo "   Strategy: FULL FINE-TUNING + Gradient Checkpointing"
+echo "   Batch Size: 4"
 echo "   Resolution: High (512-1536 tokens)"
+echo "   Expected Time: ~20 minutes"
 echo ""
 
 deepspeed src/train/train_sft.py \
@@ -55,7 +56,7 @@ deepspeed src/train/train_sft.py \
     \
     --lora_enable False \
     \
-    --gradient_checkpointing False \
+    --gradient_checkpointing True \
     \
     --max_seq_length 2048 \
     --dataloader_num_workers 8 \
@@ -67,4 +68,6 @@ deepspeed src/train/train_sft.py \
     --logging_dir $OUTPUT_DIR/logs
 
 echo ""
+echo "=========================================="
 echo "✅ Training Complete!"
+echo "=========================================="
