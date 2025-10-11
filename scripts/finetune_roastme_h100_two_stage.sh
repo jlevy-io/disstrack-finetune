@@ -35,21 +35,60 @@ validate_checkpoint() {
     
     # Check required files for resuming training
     if [ ! -f "$ckpt/adapter_model.safetensors" ]; then
-        echo "❌ Missing: adapter_model.safetensors"
         return 1
     fi
     
     if [ ! -f "$ckpt/non_lora_state_dict.bin" ]; then
-        echo "❌ Missing: non_lora_state_dict.bin"
         return 1
     fi
     
     if [ ! -f "$ckpt/config.json" ]; then
-        echo "❌ Missing: config.json (CRITICAL for resuming)"
+        return 1
+    fi
+    
+    if [ ! -f "$ckpt/trainer_state.json" ]; then
         return 1
     fi
     
     return 0
+}
+
+# ==========================================
+# Helper: Clean Corrupted Checkpoints
+# ==========================================
+
+clean_corrupted_checkpoints() {
+    local stage_dir=$1
+    local quarantine_dir="$stage_dir/.corrupted_checkpoints"
+    
+    echo "🔍 Scanning for corrupted checkpoints in $(basename $stage_dir)..."
+    
+    local found_corrupted=false
+    
+    for ckpt in $(find $stage_dir -maxdepth 1 -type d -name "checkpoint-*" | sort -V); do
+        ckpt_name=$(basename $ckpt)
+        
+        if ! validate_checkpoint "$ckpt" 2>/dev/null; then
+            found_corrupted=true
+            
+            echo "   ❌ Corrupted: $ckpt_name"
+            
+            # Move to quarantine instead of deleting (safer)
+            mkdir -p "$quarantine_dir"
+            echo "      Moving to quarantine: $quarantine_dir/$ckpt_name"
+            mv "$ckpt" "$quarantine_dir/$ckpt_name"
+        fi
+    done
+    
+    if [ "$found_corrupted" = false ]; then
+        echo "   ✅ No corrupted checkpoints found"
+    else
+        echo ""
+        echo "   Corrupted checkpoints moved to: $quarantine_dir"
+        echo "   (You can safely delete this folder later)"
+    fi
+    
+    echo ""
 }
 
 # ==========================================
@@ -85,24 +124,26 @@ elif [ -d "$STAGE1_DIR" ]; then
     
     echo "⚠️  Stage 1: INCOMPLETE"
     echo ""
-    echo "Checking for usable checkpoints..."
+    
+    # Clean any corrupted checkpoints first
+    clean_corrupted_checkpoints "$STAGE1_DIR"
+    
+    echo "Checking for valid checkpoints..."
     echo ""
     
-    # Find all checkpoints and validate them
+    # Find all valid checkpoints
     VALID_CHECKPOINTS=()
     
     for ckpt in $(find $STAGE1_DIR -maxdepth 1 -type d -name "checkpoint-*" | sort -V -r); do
         ckpt_name=$(basename $ckpt)
-        echo "Checking $ckpt_name..."
         
-        if validate_checkpoint "$ckpt"; then
-            echo "   ✅ Valid and complete"
+        if validate_checkpoint "$ckpt" 2>/dev/null; then
+            echo "   ✅ $ckpt_name: Valid"
             VALID_CHECKPOINTS+=("$ckpt")
-        else
-            echo "   ❌ Corrupted or incomplete"
         fi
-        echo ""
     done
+    
+    echo ""
     
     if [ ${#VALID_CHECKPOINTS[@]} -eq 0 ]; then
         echo "❌ No valid checkpoints found!"
@@ -189,7 +230,7 @@ if [ "$STAGE1_STATUS" != "complete" ]; then
     read -p "Press Enter to continue..."
     echo ""
     
-    # Build training command
+    # Build training command - always use base model
     TRAIN_CMD="deepspeed src/train/train_sft.py \
         --deepspeed scripts/zero2.json \
         --model_id $BASE_MODEL \
@@ -221,8 +262,8 @@ if [ "$STAGE1_STATUS" != "complete" ]; then
         --save_total_limit 2 \
         --report_to tensorboard \
         --logging_dir $STAGE1_DIR/logs"
-
-    # Add resume flag if resuming
+    
+    # Only add resume checkpoint if resuming
     if [ "$STAGE1_STATUS" = "incomplete" ] && [ -n "$RESUME_FROM" ]; then
         TRAIN_CMD="$TRAIN_CMD --resume_from_checkpoint $RESUME_FROM"
     fi
@@ -233,6 +274,9 @@ if [ "$STAGE1_STATUS" != "complete" ]; then
     TRAIN_EXIT_CODE=$?
     
     if [ $TRAIN_EXIT_CODE -eq 0 ]; then
+        # Clean corrupted checkpoints again after training
+        clean_corrupted_checkpoints "$STAGE1_DIR"
+        
         # Mark Stage 1 as complete
         touch "$STAGE1_COMPLETE_MARKER"
         echo ""
@@ -299,8 +343,9 @@ if [ ! -d "$RESUME_FROM" ]; then
     exit 1
 fi
 
-if [ ! -f "$RESUME_FROM/adapter_model.safetensors" ]; then
-    echo "❌ Error: Checkpoint is missing adapter weights"
+if ! validate_checkpoint "$RESUME_FROM" 2>/dev/null; then
+    echo "❌ Error: Checkpoint is corrupted or incomplete"
+    echo "   Missing required files"
     exit 1
 fi
 
@@ -330,13 +375,16 @@ if [ -f "$STAGE2_COMPLETE_MARKER" ]; then
     SKIP_STAGE2=true
     
 elif [ -d "$STAGE2_DIR" ]; then
+    # Clean corrupted checkpoints in Stage 2
+    clean_corrupted_checkpoints "$STAGE2_DIR"
+    
     # Stage 2 started but not completed
     STAGE2_RESUME_FROM=$(find $STAGE2_DIR -maxdepth 1 -type d -name "checkpoint-*" | sort -V | tail -1)
     
-    if [ -n "$STAGE2_RESUME_FROM" ] && [ -d "$STAGE2_RESUME_FROM" ]; then
+    if [ -n "$STAGE2_RESUME_FROM" ] && [ -d "$STAGE2_RESUME_FROM" ] && validate_checkpoint "$STAGE2_RESUME_FROM" 2>/dev/null; then
         STAGE2_STATUS="incomplete"
         echo "⚠️  Stage 2: INCOMPLETE"
-        echo "   Last checkpoint: $(basename $STAGE2_RESUME_FROM)"
+        echo "   Last valid checkpoint: $(basename $STAGE2_RESUME_FROM)"
         echo ""
         echo "Options:"
         echo "  [1] Resume Stage 2 (recommended)"
@@ -411,9 +459,10 @@ if [ "$SKIP_STAGE2" = false ]; then
     read -p "Press Enter to continue..."
     echo ""
     
-    # Build Stage 2 command
+    # Build Stage 2 command - always use base model
     TRAIN_CMD="deepspeed src/train/train_sft.py \
         --deepspeed scripts/zero2.json \
+        --model_id $BASE_MODEL \
         --data_path $DATA_PATH \
         --image_folder $IMAGE_FOLDER \
         --output_dir $STAGE2_DIR \
@@ -443,11 +492,13 @@ if [ "$SKIP_STAGE2" = false ]; then
         --report_to tensorboard \
         --logging_dir $STAGE2_DIR/logs"
     
-    # Resume or start fresh
+    # For Stage 2, we need to load Stage 1 weights
+    # Use the Stage 1 checkpoint as the starting point
+    TRAIN_CMD="$TRAIN_CMD --model_id $RESUME_FROM"
+    
+    # Resume if Stage 2 was interrupted
     if [ "$STAGE2_STATUS" = "incomplete" ] && [ -n "$STAGE2_RESUME_FROM" ]; then
-        TRAIN_CMD="$TRAIN_CMD --model_id $STAGE2_RESUME_FROM --resume_from_checkpoint $STAGE2_RESUME_FROM"
-    else
-        TRAIN_CMD="$TRAIN_CMD --model_id $RESUME_FROM"
+        TRAIN_CMD="$TRAIN_CMD --resume_from_checkpoint $STAGE2_RESUME_FROM"
     fi
     
     # Run training
@@ -456,6 +507,9 @@ if [ "$SKIP_STAGE2" = false ]; then
     TRAIN_EXIT_CODE=$?
     
     if [ $TRAIN_EXIT_CODE -eq 0 ]; then
+        # Clean corrupted checkpoints
+        clean_corrupted_checkpoints "$STAGE2_DIR"
+        
         # Mark Stage 2 as complete
         touch "$STAGE2_COMPLETE_MARKER"
         echo ""
