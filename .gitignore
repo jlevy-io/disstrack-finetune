@@ -205,3 +205,7 @@ Thumbs.db
 # VS Code workspace settings (keep tasks/extensions, ignore user settings)
 .vscode/settings.json
 .vscode/launch.json
+
+# Allow our shell script library
+!scripts/lib/
+!scripts/lib/**
