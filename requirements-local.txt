@@ -1,0 +1,20 @@
+# requirements-local.txt
+# Lightweight dependencies for LOCAL data processing only
+# (Training dependencies are in requirements.txt for RunPod)
+
+# Data Collection
+praw==7.8.1
+requests==2.32.5
+python-dotenv==1.1.1
+tqdm==4.67.1
+
+# Data Processing
+pillow==11.3.0
+pandas==2.2.0
+
+# Analysis & Testing
+ipython
+
+# Code Quality (optional but recommended)
+black
+ruff

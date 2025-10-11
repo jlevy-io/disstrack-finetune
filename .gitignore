@@ -168,3 +168,40 @@ scripts_tmp/
 logs/*.log
 
 testing.ipynb
+
+# ========================================
+# DissTrack-specific ignores
+# ========================================
+
+# Data - images and datasets (too large for git)
+data/raw/images/*.jpg
+data/raw/images/*.png
+data/raw/images/*.jpeg
+data/raw/*.jsonl
+data/raw/*.json
+*.db
+
+# Keep directory structure but ignore all image content
+data/raw/images/*
+!data/raw/images/.gitkeep
+
+# Model weights (too large for git)
+*.pth
+*.bin
+*.safetensors
+*.ckpt
+
+# Training checkpoints
+checkpoints/
+wandb/
+
+# OS-specific
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# VS Code workspace settings (keep tasks/extensions, ignore user settings)
+.vscode/settings.json
+.vscode/launch.json
