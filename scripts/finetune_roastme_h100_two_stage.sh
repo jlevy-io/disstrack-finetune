@@ -192,6 +192,7 @@ if [ "$STAGE1_STATUS" != "complete" ]; then
     # Build training command
     TRAIN_CMD="deepspeed src/train/train_sft.py \
         --deepspeed scripts/zero2.json \
+        --model_id $BASE_MODEL \
         --data_path $DATA_PATH \
         --image_folder $IMAGE_FOLDER \
         --output_dir $STAGE1_DIR \
@@ -220,12 +221,10 @@ if [ "$STAGE1_STATUS" != "complete" ]; then
         --save_total_limit 2 \
         --report_to tensorboard \
         --logging_dir $STAGE1_DIR/logs"
-    
-    # Add model_id and resume flag based on status
+
+    # Add resume flag if resuming
     if [ "$STAGE1_STATUS" = "incomplete" ] && [ -n "$RESUME_FROM" ]; then
-        TRAIN_CMD="$TRAIN_CMD --model_id $RESUME_FROM --resume_from_checkpoint $RESUME_FROM"
-    else
-        TRAIN_CMD="$TRAIN_CMD --model_id $BASE_MODEL"
+        TRAIN_CMD="$TRAIN_CMD --resume_from_checkpoint $RESUME_FROM"
     fi
     
     # Run training
