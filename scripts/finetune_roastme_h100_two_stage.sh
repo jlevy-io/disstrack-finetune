@@ -27,6 +27,32 @@ export PYTHONPATH=src:$PYTHONPATH
 unset LD_LIBRARY_PATH
 
 # ==========================================
+# Helper: Validate Checkpoint
+# ==========================================
+
+validate_checkpoint() {
+    local ckpt=$1
+    
+    # Check required files for resuming training
+    if [ ! -f "$ckpt/adapter_model.safetensors" ]; then
+        echo "❌ Missing: adapter_model.safetensors"
+        return 1
+    fi
+    
+    if [ ! -f "$ckpt/non_lora_state_dict.bin" ]; then
+        echo "❌ Missing: non_lora_state_dict.bin"
+        return 1
+    fi
+    
+    if [ ! -f "$ckpt/config.json" ]; then
+        echo "❌ Missing: config.json (CRITICAL for resuming)"
+        return 1
+    fi
+    
+    return 0
+}
+
+# ==========================================
 # Check Stage 1 Status
 # ==========================================
 
@@ -44,53 +70,55 @@ if [ -f "$STAGE1_COMPLETE_MARKER" ]; then
     # Find the final checkpoint
     if [ -d "$STAGE1_DIR/checkpoint-132" ]; then
         RESUME_FROM="$STAGE1_DIR/checkpoint-132"
-        echo "   Final checkpoint: checkpoint-132"
     elif [ -d "$STAGE1_DIR/checkpoint-100" ]; then
         RESUME_FROM="$STAGE1_DIR/checkpoint-100"
-        echo "   Final checkpoint: checkpoint-100"
     else
         RESUME_FROM=$(find $STAGE1_DIR -maxdepth 1 -type d -name "checkpoint-*" | sort -V | tail -1)
-        if [ -n "$RESUME_FROM" ]; then
-            echo "   Final checkpoint: $(basename $RESUME_FROM)"
-        else
-            RESUME_FROM="$STAGE1_DIR"
-            echo "   Using Stage 1 directory"
-        fi
+        [ -z "$RESUME_FROM" ] && RESUME_FROM="$STAGE1_DIR"
     fi
     
-    # Verify checkpoint
-    if [ -f "$RESUME_FROM/adapter_model.safetensors" ]; then
-        echo "   Status: Verified ✅"
-    else
-        echo "   Status: Checkpoint corrupted ❌"
-        echo ""
-        echo "⚠️  Completion marker exists but checkpoint is invalid!"
-        read -p "Re-train Stage 1 from scratch? (y/n): " -n 1 -r
-        echo ""
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            rm -f "$STAGE1_COMPLETE_MARKER"
-            STAGE1_STATUS="not_started"
-        else
-            echo "Aborted."
-            exit 1
-        fi
-    fi
+    echo "   Using checkpoint: $(basename $RESUME_FROM)"
     
 elif [ -d "$STAGE1_DIR" ]; then
     # Stage 1 started but not completed
     STAGE1_STATUS="incomplete"
     
-    # Find last checkpoint to resume from
-    RESUME_FROM=$(find $STAGE1_DIR -maxdepth 1 -type d -name "checkpoint-*" | sort -V | tail -1)
+    echo "⚠️  Stage 1: INCOMPLETE"
+    echo ""
+    echo "Checking for usable checkpoints..."
+    echo ""
     
-    if [ -n "$RESUME_FROM" ] && [ -d "$RESUME_FROM" ]; then
+    # Find all checkpoints and validate them
+    VALID_CHECKPOINTS=()
+    
+    for ckpt in $(find $STAGE1_DIR -maxdepth 1 -type d -name "checkpoint-*" | sort -V -r); do
+        ckpt_name=$(basename $ckpt)
+        echo "Checking $ckpt_name..."
+        
+        if validate_checkpoint "$ckpt"; then
+            echo "   ✅ Valid and complete"
+            VALID_CHECKPOINTS+=("$ckpt")
+        else
+            echo "   ❌ Corrupted or incomplete"
+        fi
+        echo ""
+    done
+    
+    if [ ${#VALID_CHECKPOINTS[@]} -eq 0 ]; then
+        echo "❌ No valid checkpoints found!"
+        echo "   Stage 1 must be restarted from scratch."
+        STAGE1_STATUS="not_started"
+    else
+        # Use the latest valid checkpoint
+        RESUME_FROM="${VALID_CHECKPOINTS[0]}"
         CKPT_NUM=$(basename $RESUME_FROM | sed 's/checkpoint-//')
-        echo "⚠️  Stage 1: INCOMPLETE"
-        echo "   Last checkpoint: $(basename $RESUME_FROM)"
-        echo "   Progress: ~$((CKPT_NUM * 100 / 132))% complete"
+        
+        echo "Found ${#VALID_CHECKPOINTS[@]} valid checkpoint(s)"
+        echo "Latest valid: $(basename $RESUME_FROM)"
+        echo "Progress: ~$((CKPT_NUM * 100 / 132))% complete"
         echo ""
         echo "Options:"
-        echo "  [1] Resume from checkpoint-$CKPT_NUM (recommended)"
+        echo "  [1] Resume from $(basename $RESUME_FROM) (recommended)"
         echo "  [2] Start Stage 1 from scratch"
         echo "  [3] Cancel"
         echo ""
@@ -99,7 +127,7 @@ elif [ -d "$STAGE1_DIR" ]; then
         
         case $REPLY in
             1)
-                echo "✅ Will resume from checkpoint-$CKPT_NUM"
+                echo "✅ Will resume from $(basename $RESUME_FROM)"
                 ;;
             2)
                 echo "⚠️  Starting from scratch"
@@ -122,10 +150,6 @@ elif [ -d "$STAGE1_DIR" ]; then
                 exit 1
                 ;;
         esac
-    else
-        echo "⚠️  Stage 1 directory exists but no checkpoints found"
-        echo "   Will start from scratch"
-        STAGE1_STATUS="not_started"
     fi
 else
     echo "📍 Stage 1: NOT STARTED"
@@ -156,6 +180,9 @@ if [ "$STAGE1_STATUS" != "complete" ]; then
     
     if [ "$STAGE1_STATUS" = "incomplete" ]; then
         echo "Resuming from: $RESUME_FROM"
+        CKPT_NUM=$(basename $RESUME_FROM | sed 's/checkpoint-//')
+        REMAINING=$((132 - CKPT_NUM))
+        echo "Remaining steps: ~$REMAINING"
         echo ""
     fi
     
@@ -215,15 +242,17 @@ if [ "$STAGE1_STATUS" != "complete" ]; then
         echo "=========================================="
         echo ""
         
-        # Find final checkpoint
-        if [ -d "$STAGE1_DIR/checkpoint-132" ]; then
-            RESUME_FROM="$STAGE1_DIR/checkpoint-132"
-        elif [ -d "$STAGE1_DIR/checkpoint-100" ]; then
-            RESUME_FROM="$STAGE1_DIR/checkpoint-100"
-        else
-            RESUME_FROM=$(find $STAGE1_DIR -maxdepth 1 -type d -name "checkpoint-*" | sort -V | tail -1)
-            [ -z "$RESUME_FROM" ] && RESUME_FROM="$STAGE1_DIR"
-        fi
+        # Find final checkpoint - prefer the latest valid one
+        FINAL_CKPT=""
+        for ckpt in $(find $STAGE1_DIR -maxdepth 1 -type d -name "checkpoint-*" | sort -V -r); do
+            if validate_checkpoint "$ckpt" 2>/dev/null; then
+                FINAL_CKPT="$ckpt"
+                break
+            fi
+        done
+        
+        [ -z "$FINAL_CKPT" ] && FINAL_CKPT="$STAGE1_DIR"
+        RESUME_FROM="$FINAL_CKPT"
         
         echo "📁 Final checkpoint: $RESUME_FROM"
         echo ""
