@@ -4,14 +4,14 @@
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 train_stage2() {
-    local stage1_model=$1
+    local stage1_model=$1  # Keep parameter for compatibility
     local status=$2
     local resume_from=$3
     
     log_section "🚀 STAGE 2: Training Vision Tower"
     
     echo "Configuration:" >&2
-    echo "   Starting from: $(basename "$stage1_model")" >&2
+    echo "   Starting from: Base model (vision tower was frozen in Stage 1)" >&2
     echo "   Vision Tower: TRAINING" >&2
     echo "   LLM: FROZEN + LoRA (rank 64)" >&2
     echo "   Merger: FROZEN" >&2
@@ -29,10 +29,10 @@ train_stage2() {
     read -p "Press Enter to continue..." >&2
     echo "" >&2
     
-    # Build command
+    # Build command - USE BASE MODEL, not Stage 1 merged
     local cmd="deepspeed src/train/train_sft.py"
     cmd="$cmd --deepspeed scripts/zero2.json"
-    cmd="$cmd --model_id \"$stage1_model\""
+    cmd="$cmd --model_id $BASE_MODEL"  # ← Changed from stage1_model to BASE_MODEL
     cmd="$cmd --data_path $DATA_PATH"
     cmd="$cmd --image_folder $IMAGE_FOLDER"
     cmd="$cmd --output_dir $STAGE2_DIR"
