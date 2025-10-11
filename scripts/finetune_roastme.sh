@@ -56,7 +56,7 @@ deepspeed src/train/train_sft.py \
     --gradient_accumulation_steps 8 \
     \
     --freeze_vision_tower False \
-    --freeze_llm False \
+    --freeze_llm True \
     --freeze_merger False \
     \
     --learning_rate 1e-4 \
