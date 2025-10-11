@@ -38,7 +38,7 @@ echo ""
 # Training with DeepSpeed
 # ==========================================
 
-deepspeed src/train/train.py \
+deepspeed src/train/train_sft.py \
     --deepspeed scripts/zero2.json \
     --model_id $MODEL_ID \
     --data_path $DATA_PATH \
