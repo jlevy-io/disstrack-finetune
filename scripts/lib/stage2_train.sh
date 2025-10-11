@@ -1,7 +1,7 @@
 #!/bin/bash
 # Stage 2: Fine-tune Vision Tower
 
-source "$(dirname "$0")/common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 run_stage2() {
     local stage1_model=$1

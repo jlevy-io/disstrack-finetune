@@ -1,7 +1,7 @@
 #!/bin/bash
 # Stage 1: Train Merger + LoRA
 
-source "$(dirname "$0")/common.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 run_stage1() {
     log_section "🔍 Checking Stage 1 Status"
