@@ -38,15 +38,23 @@ def convert():
             
             # Extract text from content
             text = ""
+            has_image = False
+            
             if isinstance(msg['content'], list):
                 for content in msg['content']:
                     if content['type'] == 'text':
                         text = content['text']
                     elif content['type'] == 'image':
-                        # Add <image> token at start for user message
-                        text = "<image>\n" + text
+                        has_image = True
             else:
                 text = msg['content']
+            
+            # Add <image> token for user message with image
+            if role == "human" and has_image:
+                text = f"<image>\n{text}"
+            elif role == "human" and not has_image:
+                # User message should have image token since there's an image field
+                text = f"<image>\n{text}"
             
             conversations.append({
                 "from": role,
@@ -69,11 +77,10 @@ def convert():
     # Show sample
     print(f"\n📋 Sample converted format:\n")
     sample = llava_format[0]
-    print(json.dumps(sample, indent=2)[:500] + "...")
+    print(json.dumps(sample, indent=2)[:600] + "...")
     
     print(f"\n🎯 Next steps:")
-    print(f"   1. Commit & push to GitHub")
-    print(f"   2. Pull on RunPod and train!")
+    print(f"   1. Train: bash scripts/finetune_roastme_h100.sh")
     print()
 
 if __name__ == "__main__":
