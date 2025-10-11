@@ -21,31 +21,31 @@ export PYTHONPATH=src:$PYTHONPATH
 unset LD_LIBRARY_PATH
 
 # ==========================================
-# Helper Functions
+# Helper Functions (ALL OUTPUT TO STDERR)
 # ==========================================
 
 log_section() {
-    echo ""
-    echo "=========================================="
-    echo "$1"
-    echo "=========================================="
-    echo ""
+    echo "" >&2
+    echo "==========================================" >&2
+    echo "$1" >&2
+    echo "==========================================" >&2
+    echo "" >&2
 }
 
 log_info() {
-    echo "ℹ️  $1"
+    echo "ℹ️  $1" >&2
 }
 
 log_success() {
-    echo "✅ $1"
+    echo "✅ $1" >&2
 }
 
 log_warning() {
-    echo "⚠️  $1"
+    echo "⚠️  $1" >&2
 }
 
 log_error() {
-    echo "❌ $1"
+    echo "❌ $1" >&2
 }
 
 validate_checkpoint() {
@@ -63,7 +63,7 @@ clean_corrupted_checkpoints() {
     local stage_dir=$1
     local quarantine_dir="$stage_dir/.corrupted_checkpoints"
     
-    echo "🔍 Scanning for corrupted checkpoints in $(basename $stage_dir)..."
+    echo "🔍 Scanning for corrupted checkpoints in $(basename $stage_dir)..." >&2
     
     local found_corrupted=false
     
@@ -75,7 +75,7 @@ clean_corrupted_checkpoints() {
             log_error "Corrupted: $ckpt_name"
             
             mkdir -p "$quarantine_dir"
-            echo "      Moving to quarantine: $quarantine_dir/$ckpt_name"
+            echo "      Moving to quarantine: $quarantine_dir/$ckpt_name" >&2
             mv "$ckpt" "$quarantine_dir/$ckpt_name"
         fi
     done
@@ -83,16 +83,16 @@ clean_corrupted_checkpoints() {
     if [ "$found_corrupted" = false ]; then
         log_success "No corrupted checkpoints found"
     else
-        echo ""
+        echo "" >&2
         log_info "Corrupted checkpoints moved to: $quarantine_dir"
         log_info "(You can safely delete this folder later)"
     fi
     
-    echo ""
+    echo "" >&2
 }
 
 clear_gpu_memory() {
-    echo "🧹 Clearing GPU memory..."
+    echo "🧹 Clearing GPU memory..." >&2
     pkill -9 python3 || true
     sleep 3
 }
@@ -101,7 +101,7 @@ check_disk_space() {
     local required_gb=$1
     local available_gb=$(df /workspace | tail -1 | awk '{print int($4/1024/1024)}')
     
-    echo "💾 Disk space: ${available_gb}GB available"
+    echo "💾 Disk space: ${available_gb}GB available" >&2
     
     if [ $available_gb -lt $required_gb ]; then
         log_warning "Less than ${required_gb}GB available"
@@ -117,9 +117,9 @@ merge_lora_weights() {
     
     log_section "🔧 Merging LoRA Weights"
     
-    echo "Source: $checkpoint"
-    echo "Output: $output_path"
-    echo ""
+    echo "Source: $checkpoint" >&2
+    echo "Output: $output_path" >&2
+    echo "" >&2
     
     python src/merge_lora_weights.py \
         --model-path "$checkpoint" \
