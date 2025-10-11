@@ -9,24 +9,20 @@ echo ""
 # Fix libcudnn error (from original README)
 unset LD_LIBRARY_PATH
 
-# Update system
-apt-get update
-apt-get install -y git-lfs
-
-# Upgrade pip
-pip install --upgrade pip setuptools wheel
+echo "🔧 Upgrading pip..."
+pip install --upgrade pip wheel
 
 echo "📦 Installing PyTorch (CUDA 12.8)..."
-pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0
+pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128
 
 echo "⚡ Installing Flash Attention..."
-pip install flash-attn --no-build-isolation
+MAX_JOBS=4 pip install flash-attn --no-build-isolation
 
 echo "📚 Installing Qwen utilities..."
 pip install qwen-vl-utils
 
-echo "📦 Installing remaining dependencies..."
-pip install -r requirements.txt
+echo "📦 Installing remaining dependencies (ignoring system packages)..."
+pip install -r requirements.txt --ignore-installed pyparsing --ignore-installed setuptools
 
 echo ""
 echo "=========================================="
@@ -34,7 +30,7 @@ echo "✅ Installation Complete!"
 echo "=========================================="
 echo ""
 echo "🧪 Testing installation..."
-python -c "
+python3 -c "
 import torch
 import transformers
 import deepspeed
@@ -54,6 +50,6 @@ print('🎉 All systems ready!')
 
 echo ""
 echo "🎯 Next steps:"
-echo "   1. Copy your data to data/raw/"
+echo "   1. Upload data: see upload instructions"
 echo "   2. Run: bash scripts/finetune_roastme.sh"
 echo ""
