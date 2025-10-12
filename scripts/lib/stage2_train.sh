@@ -17,6 +17,7 @@ train_stage2() {
     echo "   Merger: FROZEN" >&2
     echo "   Batch Size: 1" >&2
     echo "   Epochs: 2" >&2
+    echo "   Checkpoint Strategy: Keep only latest (saves disk space)" >&2
     echo "" >&2
     
     check_disk_space 20 || {
@@ -32,7 +33,7 @@ train_stage2() {
     # Build command - USE BASE MODEL, not Stage 1 merged
     local cmd="deepspeed src/train/train_sft.py"
     cmd="$cmd --deepspeed scripts/zero2.json"
-    cmd="$cmd --model_id $BASE_MODEL"  # ← Changed from stage1_model to BASE_MODEL
+    cmd="$cmd --model_id $BASE_MODEL"
     cmd="$cmd --data_path $DATA_PATH"
     cmd="$cmd --image_folder $IMAGE_FOLDER"
     cmd="$cmd --output_dir $STAGE2_DIR"
@@ -58,7 +59,7 @@ train_stage2() {
     cmd="$cmd --logging_steps 5"
     cmd="$cmd --save_strategy steps"
     cmd="$cmd --save_steps 50"
-    cmd="$cmd --save_total_limit 2"
+    cmd="$cmd --save_total_limit 1"
     cmd="$cmd --report_to tensorboard"
     cmd="$cmd --logging_dir $STAGE2_DIR/logs"
     
@@ -74,6 +75,40 @@ train_stage2() {
     if [ $exit_code -eq 0 ]; then
         clean_corrupted_checkpoints "$STAGE2_DIR"
         touch "$STAGE2_COMPLETE_MARKER"
+        
+        # Clean up Stage 1 files to save disk space
+        log_section "🧹 CLEANING UP STAGE 1 FILES"
+        echo "Stage 2 complete! Cleaning up Stage 1 to save disk space..." >&2
+        echo "" >&2
+        
+        local space_freed=0
+        
+        # Delete Stage 1 checkpoints
+        if [ -d "$STAGE1_DIR" ]; then
+            local stage1_size=$(du -sm "$STAGE1_DIR" 2>/dev/null | cut -f1)
+            echo "   Deleting Stage 1 checkpoints (~${stage1_size}MB)..." >&2
+            rm -rf "$STAGE1_DIR"
+            space_freed=$((space_freed + stage1_size))
+        fi
+        
+        # Delete Stage 1 merged model (optional - uncomment if you need more space)
+        # WARNING: You won't be able to resume Stage 2 from scratch without this!
+        # if [ -d "${STAGE1_DIR}-merged" ]; then
+        #     local merged_size=$(du -sm "${STAGE1_DIR}-merged" 2>/dev/null | cut -f1)
+        #     echo "   Deleting Stage 1 merged model (~${merged_size}MB)..." >&2
+        #     rm -rf "${STAGE1_DIR}-merged"
+        #     space_freed=$((space_freed + merged_size))
+        # fi
+        
+        if [ $space_freed -gt 0 ]; then
+            echo "" >&2
+            log_success "Freed up ~${space_freed}MB of disk space"
+        fi
+        
+        echo "" >&2
+        echo "💾 Current disk usage:" >&2
+        df -h /workspace 2>/dev/null | grep -v "Filesystem" || df -h / | grep -v "Filesystem"
+        echo "" >&2
         
         log_section "✅ STAGE 2 COMPLETE!"
         clear_gpu_memory

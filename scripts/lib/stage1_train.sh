@@ -51,6 +51,7 @@ train_stage1() {
     echo "   Merger: TRAINING" >&2
     echo "   Batch Size: 4" >&2
     echo "   Epochs: 3" >&2
+    echo "   Checkpoint Strategy: Keep only latest (saves disk space)" >&2
     echo "" >&2
     
     if [ "$status" = "incomplete" ]; then
@@ -99,7 +100,7 @@ train_stage1() {
         --logging_steps 5 \
         --save_strategy steps \
         --save_steps 50 \
-        --save_total_limit 2 \
+        --save_total_limit 1 \
         --report_to tensorboard \
         --logging_dir $STAGE1_DIR/logs"
     
