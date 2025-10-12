@@ -98,8 +98,7 @@ train_stage1() {
         --max_seq_length 2048 \
         --dataloader_num_workers 4 \
         --logging_steps 5 \
-        --save_strategy steps \
-        --save_steps 50 \
+        --save_strategy "epoch" \
         --save_total_limit 1 \
         --report_to tensorboard \
         --logging_dir $STAGE1_DIR/logs"

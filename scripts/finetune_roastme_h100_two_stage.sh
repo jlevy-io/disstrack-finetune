@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -e  # Exit on any error
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
@@ -10,6 +10,19 @@ log_section "🔥 DissTrack H100 - Two-Stage Training"
 
 # Stage 1
 stage1_output=$(run_stage1)
+stage1_exit=$?
+
+# Exit if Stage 1 failed
+if [ $stage1_exit -ne 0 ]; then
+    log_error "Stage 1 failed, cannot proceed to Stage 2"
+    exit 1
+fi
+
+# Only proceed if Stage 1 succeeded
+if [ -z "$stage1_output" ]; then
+    log_error "Stage 1 did not return a valid model path"
+    exit 1
+fi
 
 # Stage 2
 run_stage2 "$stage1_output"
