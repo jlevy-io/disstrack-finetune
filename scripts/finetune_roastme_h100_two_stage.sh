@@ -8,19 +8,30 @@ source "$SCRIPT_DIR/lib/stage2_train.sh"
 
 log_section "🔥 DissTrack H100 - Two-Stage Training"
 
-# Stage 1 - exit if it fails
-stage1_output=$(run_stage1) || {
-    log_error "Stage 1 failed, cannot proceed"
-    exit 1
-}
+# Stage 1
+stage1_output=$(run_stage1)
+stage1_output=$(echo "$stage1_output" | tr -d '[:space:]')  # Strip whitespace
 
 # Verify we got a valid output path
-if [ -z "$stage1_output" ] || [ ! -d "$stage1_output" ]; then
-    log_error "Stage 1 did not produce a valid merged model"
+if [ -z "$stage1_output" ]; then
+    log_error "Stage 1 returned empty path"
     exit 1
 fi
 
-# Stage 2 - exit if it fails
+# Give filesystem a moment to sync
+sleep 1
+
+if [ ! -d "$stage1_output" ]; then
+    log_error "Stage 1 path does not exist: '$stage1_output'"
+    echo "Checking outputs directory:" >&2
+    ls -la outputs/ >&2
+    exit 1
+fi
+
+log_success "Stage 1 completed: $stage1_output"
+echo "" >&2
+
+# Stage 2
 run_stage2 "$stage1_output" || {
     log_error "Stage 2 failed"
     exit 1
