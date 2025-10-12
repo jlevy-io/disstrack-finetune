@@ -185,6 +185,9 @@ data/raw/*.json
 data/raw/images/*
 !data/raw/images/.gitkeep
 
+data/llava_format/*
+!data/llava_format/.gitkeep
+
 # Model weights (too large for git)
 *.pth
 *.bin
