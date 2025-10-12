@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e  # Exit on any error
+set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
@@ -8,24 +8,23 @@ source "$SCRIPT_DIR/lib/stage2_train.sh"
 
 log_section "🔥 DissTrack H100 - Two-Stage Training"
 
-# Stage 1
-stage1_output=$(run_stage1)
-stage1_exit=$?
+# Stage 1 - exit if it fails
+stage1_output=$(run_stage1) || {
+    log_error "Stage 1 failed, cannot proceed"
+    exit 1
+}
 
-# Exit if Stage 1 failed
-if [ $stage1_exit -ne 0 ]; then
-    log_error "Stage 1 failed, cannot proceed to Stage 2"
+# Verify we got a valid output path
+if [ -z "$stage1_output" ] || [ ! -d "$stage1_output" ]; then
+    log_error "Stage 1 did not produce a valid merged model"
     exit 1
 fi
 
-# Only proceed if Stage 1 succeeded
-if [ -z "$stage1_output" ]; then
-    log_error "Stage 1 did not return a valid model path"
+# Stage 2 - exit if it fails
+run_stage2 "$stage1_output" || {
+    log_error "Stage 2 failed"
     exit 1
-fi
-
-# Stage 2
-run_stage2 "$stage1_output"
+}
 
 # Optional: Merge final model
 log_section "🔧 MERGE FINAL MODEL?"
