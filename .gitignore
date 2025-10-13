@@ -194,6 +194,8 @@ data/llava_format/*
 *.safetensors
 *.ckpt
 
+outputs/
+
 # Training checkpoints
 checkpoints/
 wandb/
