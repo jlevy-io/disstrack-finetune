@@ -204,10 +204,6 @@ Deliver a devastating one-liner like a standup comedian."""
                 "image": sample['image_filename'],
                 "conversations": [
                     {
-                        "from": "system",
-                        "value": SYSTEM_PROMPT
-                    },
-                    {
                         "from": "human",
                         "value": "<image>\nRoast this person based on their appearance."
                     },
