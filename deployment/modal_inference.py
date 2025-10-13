@@ -54,12 +54,21 @@ app = modal.App(
 )
 
 # ==========================================
-# System Message (UPDATED - More Specific)
+# System Message & Prompt (MATCHES TRAINING DATA)
 # ==========================================
 
-SYSTEM_MESSAGE = """You are a savage roast comedian. Generate ONE single-sentence roast (maximum 15 words) about a specific visual detail you see. Focus ONLY on: hair, face, eyes, nose, clothing, or expression. Be brutal and funny. No explanations, no apologies, no Reddit comments."""
+SYSTEM_MESSAGE = """You are a sharp-witted roast comedian performing in a consensual roast battle inspired by Reddit's r/RoastMe. Generate one savage, hilarious roast based ONLY on what you see in the photo.
 
-USER_PROMPT = "Roast ONE thing you see in 15 words or less."
+Rules:
+- Attack specific visual details: appearance, expression, outfit, setting
+- Use clever comparisons and pop culture references  
+- Keep it punchy: 1-2 sentences, under 100 characters ideal
+- Be brutally funny - no holding back
+- No hedging, no apologies, just pure roast
+
+Deliver a devastating one-liner like a standup comedian."""
+
+USER_PROMPT = "Roast this person based on their appearance."
 
 # ==========================================
 # Model Class
@@ -137,10 +146,10 @@ class RoastModel:
         self,
         image_id: str,
         num_candidates: int = 3,
-        temperature: float = 0.6,       # UPDATED: Reduced from 0.95
-        top_p: float = 0.8,             # UPDATED: Reduced from 0.92
-        top_k: int = 20,                # UPDATED: Reduced from 40
-        max_new_tokens: int = 50        # UPDATED: Reduced from 100
+        temperature: float = 0.85,      # Tuned for creative roasts
+        top_p: float = 0.9,             # Allow diverse vocabulary
+        top_k: int = 50,                # Reasonable sampling pool
+        max_new_tokens: int = 80        # ~50-100 chars typical
     ) -> dict:
         """
         Generate multiple roasts for a cached image
@@ -148,10 +157,10 @@ class RoastModel:
         Args:
             image_id: UUID from upload_image
             num_candidates: Number of roasts to generate (default: 3)
-            temperature: Sampling temperature (default: 0.6)
-            top_p: Nucleus sampling threshold (default: 0.8)
-            top_k: Top-k sampling (default: 20)
-            max_new_tokens: Max tokens per roast (default: 50)
+            temperature: Sampling temperature (default: 0.85)
+            top_p: Nucleus sampling threshold (default: 0.9)
+            top_k: Top-k sampling (default: 50)
+            max_new_tokens: Max tokens per roast (default: 80)
             
         Returns:
             dict with 'candidates' list and 'count'
@@ -201,10 +210,11 @@ class RoastModel:
                 return_tensors="pt"
             ).to(self.model.device)
             
+            # Different seed per candidate for variety
             seed = random.randint(0, 1000000)
             torch.manual_seed(seed)
             
-            # UPDATED: More conservative generation parameters
+            # Generation parameters tuned for ~71 char roasts
             generated_ids = self.model.generate(
                 **inputs,
                 max_new_tokens=max_new_tokens,
@@ -212,8 +222,8 @@ class RoastModel:
                 top_p=top_p,
                 top_k=top_k,
                 do_sample=True,
-                repetition_penalty=1.8,     # UPDATED: Increased from 1.15
-                no_repeat_ngram_size=3      # UPDATED: Increased from 2
+                repetition_penalty=1.2,     # Prevent repetition
+                no_repeat_ngram_size=2      # Block 2-gram repetition
             )
             
             generated_ids_trimmed = [

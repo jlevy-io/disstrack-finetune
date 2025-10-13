@@ -1,6 +1,6 @@
 """
-Ultra-aggressive cleaning + conversion to LLaVA format v3
-Improved with expanded visual keywords and tiered scoring
+Ultra-aggressive cleaning + conversion to LLaVA format v4
+Strict visual grounding focus + system prompts + train/val split
 """
 
 import json
@@ -77,87 +77,70 @@ def ultra_clean_roast(roast_text: str) -> Optional[str]:
 
 def is_high_quality(roast_text: str, roast_score: int) -> Tuple[bool, str]:
     """
-    Improved quality check with tiered scoring and expanded visual keywords
+    STRICT quality check focused on visual grounding
     Returns: (is_valid, reason)
     """
+    text_lower = roast_text.lower()
     
-    # Length check
-    if len(roast_text) < 20:
+    # 1. Length check - STRICT
+    if len(roast_text) < 25:
         return False, "too_short"
-    if len(roast_text) > 200:  # Increased from 150
+    if len(roast_text) > 150:
         return False, "too_long"
     
-    # TIERED SCORE CHECK (more lenient)
-    if roast_score < 75:  # Lowered from 150
+    # 2. Score check - HIGHER THRESHOLD
+    if roast_score < 100:
         return False, "low_score"
     
-    # EXPANDED visual grounding keywords
-    visual_keywords = [
-        # Face features
-        'hair', 'face', 'eye', 'eyes', 'nose', 'mouth', 'teeth', 'smile', 'smiling',
-        'forehead', 'chin', 'eyebrow', 'eyebrows', 'beard', 'mustache', 'glasses', 'head',
-        'ear', 'ears', 'cheek', 'cheeks', 'jaw', 'neck', 'skin', 'lips',
-        
-        # Body/appearance
-        'wearing', 'shirt', 'outfit', 'clothes', 'look', 'looking', 'looks',
-        'body', 'arm', 'arms', 'hand', 'hands', 'finger', 'fingers',
-        'tall', 'short', 'fat', 'thin', 'skinny', 'big', 'small', 'ugly',
-        
-        # Hair descriptors
-        'bald', 'balding', 'hairline', 'hairy', 'shaved', 'curly', 'greasy',
-        
-        # Physical comparisons (very common in roasts)
-        'look like', 'looks like', 'looking like', 'looked like',
-        'remind', 'reminds', 'resemble', 'resembles',
-        
-        # Visual descriptors
-        'pretty', 'handsome', 'attractive', 'beautiful',
-        'pale', 'dark', 'bright', 'color', 'colored',
-        'shaped', 'round', 'square', 'long', 'wide',
-        
-        # Specific terms from common roasts
-        'dude', 'guy', 'girl', 'man', 'woman', 'boy',
-        'forehead', 'fivehead', 'receding',
-        
-        # Size/appearance
-        'giant', 'tiny', 'huge', 'massive', 'small'
+    # 3. AUTO-REJECT patterns (non-visual content)
+    reject_patterns = [
+        r'\bkarma\b', r'\bsubscriber[s]?\b', r'\bharvard\b', r'\bcollege\b',
+        r'\bi bet you\b', r'\byou probably\b', r'\bi heard\b',
+        r'\bglad\b', r'\bcongrat[s]?\b', r'\bgood job\b', r'\bnice\b',
+        r'\bperfectly valid\b', r'\bwe care\b',
+        r'\bthis time\b', r'\bupdated\b', r'\bagain\b', r'\bstill\b',
+        r'\bvirgin\b', r'\bgirlfriend\b', r'\bboyfriend\b',
+        r'\bjob\b', r'\bmoney\b', r'\brich\b', r'\bpoor\b'
     ]
     
-    text_lower = roast_text.lower()
-    visual_count = sum(1 for kw in visual_keywords if kw in text_lower)
+    for pattern in reject_patterns:
+        if re.search(pattern, text_lower):
+            return False, "non_visual_content"
     
-    # LOWERED from 2 to 1 for high-scoring roasts
-    min_visual = 1 if roast_score >= 150 else 1  # Always require at least 1
+    # 4. MUST have visual comparison OR multiple physical features
+    visual_comparisons = [
+        r'\blook like\b', r'\blooks like\b', r'\blooking like\b',
+        r'\bremind[s]? me of\b', r'\bresemble[s]?\b',
+        r'\bif .+ had a baby\b', r'\bif .+ and .+ had\b',
+        r'\bknockoff\b', r'\bdollar store\b', r'\bwish\.com\b'
+    ]
     
-    if visual_count < min_visual:
-        return False, "not_visual"
+    has_comparison = any(re.search(pattern, text_lower) for pattern in visual_comparisons)
     
-    # Check for remaining artifacts
+    # Physical features
+    physical_features = [
+        'face', 'forehead', 'fivehead', 'hair', 'hairline', 'receding',
+        'eye', 'eyes', 'nose', 'mouth', 'teeth', 'smile', 'smiling',
+        'chin', 'eyebrow', 'eyebrows', 'beard', 'mustache',
+        'head', 'neck', 'cheek', 'cheeks', 'jaw', 'lips',
+        'body', 'arm', 'arms', 'hand', 'hands'
+    ]
+    
+    feature_count = sum(1 for f in physical_features if f in text_lower)
+    
+    # Need EITHER comparison OR 2+ features
+    if not has_comparison and feature_count < 2:
+        return False, "not_visual_enough"
+    
+    # 5. Check for remaining artifacts
     bad_patterns = [
         r'http', r'www\.', r'\.com', r'imgur', r'reddit',
-        r'edit:', r'thank', r'award',
-        r'subreddit', r'upvote', r'#\w+'
+        r'subreddit', r'upvote'
     ]
     
     for pattern in bad_patterns:
         if re.search(pattern, text_lower):
-            return False, f"has_artifact"
-    
-    # Check for non-visual personality roasts (less strict now)
-    non_visual = [
-        'you probably', 'i bet you', 'you must be',
-        'you seem like', 'you\'re the type'
-    ]
-    
-    # Only fail if it's low-scoring AND non-visual
-    if roast_score < 100:
-        if any(phrase in text_lower for phrase in non_visual):
-            return False, "not_grounded"
-    
-    # Check for sympathy/encouragement
-    sympathy = ['stay strong', 'you got this', 'good luck', 'hope you', 'prayers']
-    if any(phrase in text_lower for phrase in sympathy):
-        return False, "sympathy"
+            return False, "has_artifact"
     
     return True, "valid"
 
@@ -165,11 +148,23 @@ def clean_and_convert(
     input_file: str = "data/raw/training_data.jsonl",
     output_file: str = "data/llava_format/train.json"
 ):
-    """Clean and convert to LLaVA format with improved filtering"""
+    """Clean and convert to LLaVA format with strict visual filtering"""
     
     print("\n" + "="*70)
-    print("🧹 IMPROVED CLEANING + CONVERSION v1.0")
+    print("🧹 STRICT VISUAL FILTERING + CONVERSION v4.0")
     print("="*70 + "\n")
+    
+    # System prompt (matches production)
+    SYSTEM_PROMPT = """You are a sharp-witted roast comedian performing in a consensual roast battle inspired by Reddit's r/RoastMe. Generate one savage, hilarious roast based ONLY on what you see in the photo.
+
+Rules:
+- Attack specific visual details: appearance, expression, outfit, setting
+- Use clever comparisons and pop culture references  
+- Keep it punchy: 1-2 sentences, under 100 characters ideal
+- Be brutally funny - no holding back
+- No hedging, no apologies, just pure roast
+
+Deliver a devastating one-liner like a standup comedian."""
     
     # Load raw data
     samples = []
@@ -203,11 +198,15 @@ def clean_and_convert(
                 stats[reason] += 1
                 continue
             
-            # Convert to LLaVA format
+            # Convert to LLaVA format with system prompt
             llava_data.append({
                 "id": f"{sample['id']}_r{roast_idx}",
                 "image": sample['image_filename'],
                 "conversations": [
+                    {
+                        "from": "system",
+                        "value": SYSTEM_PROMPT
+                    },
                     {
                         "from": "human",
                         "value": "<image>\nRoast this person based on their appearance."
@@ -221,12 +220,27 @@ def clean_and_convert(
             
             stats['kept'] += 1
     
-    # Save
+    # Split train/val
+    import random
+    random.seed(42)
+    random.shuffle(llava_data)
+    
+    val_ratio = 0.1
+    split_idx = int(len(llava_data) * (1 - val_ratio))
+    train_data = llava_data[:split_idx]
+    val_data = llava_data[split_idx:]
+    
+    # Save train
     output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     
     with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(llava_data, f, indent=2, ensure_ascii=False)
+        json.dump(train_data, f, indent=2, ensure_ascii=False)
+    
+    # Save val
+    val_path = output_path.parent / "val.json"
+    with open(val_path, 'w', encoding='utf-8') as f:
+        json.dump(val_data, f, indent=2, ensure_ascii=False)
     
     # Stats
     print(f"\n{'='*70}")
@@ -243,36 +257,37 @@ def clean_and_convert(
     
     for reason, count in removal_reasons:
         pct = count/stats['total']*100
-        print(f"   {reason:20s}: {count:4d} ({pct:5.1f}%)")
+        print(f"   {reason:25s}: {count:4d} ({pct:5.1f}%)")
     
-    print(f"\n📁 Output: {output_path}")
-    print(f"📊 Final dataset size: {len(llava_data)} samples")
+    print(f"\n📊 Split complete:")
+    print(f"   Train: {len(train_data)} samples → {output_path}")
+    print(f"   Val:   {len(val_data)} samples → {val_path}")
     
     # Show samples
     print(f"\n{'='*70}")
     print(f"📋 SAMPLE CLEANED ROASTS")
     print(f"{'='*70}\n")
     
-    import random
-    sample_count = min(15, len(llava_data))
-    for i, sample in enumerate(random.sample(llava_data, sample_count), 1):
-        roast = sample['conversations'][1]['value']
+    sample_count = min(15, len(train_data))
+    for i, sample in enumerate(random.sample(train_data, sample_count), 1):
+        roast = sample['conversations'][2]['value']
         print(f"{i}. {roast}\n")
     
     print(f"{'='*70}\n")
     
     # Assessment
-    if stats['kept'] < 300:
-        print("⚠️  WARNING: Less than 300 clean samples!")
-        print("   You may need to collect more data.")
+    if stats['kept'] < 500:
+        print("⚠️  WARNING: Less than 500 clean samples!")
+        print("   You may need to:")
+        print(f"   - Lower min_score threshold (currently 100)")
+        print(f"   - Collect more data")
         print(f"   Current: {stats['kept']} samples")
-        print(f"   Recommended minimum: 500-1000 for decent fine-tuning")
-    elif stats['kept'] < 500:
-        print("⚠️  CAUTION: {stats['kept']} samples is on the low end.")
-        print("   This might work but consider collecting more data.")
+    elif stats['kept'] < 800:
+        print(f"⚠️  {stats['kept']} samples - Workable but could be better")
+        print("   Consider collecting more data for optimal results")
     else:
         print(f"✅ {stats['kept']} samples - Good dataset size!")
-        print("   Ready for fine-tuning preparation.")
+        print("   Ready for training!")
     
     print()
 
