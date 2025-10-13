@@ -58,7 +58,7 @@ deepspeed src/train/train_sft.py \
     --deepspeed scripts/zero2.json \
     --model_id $BASE_MODEL \
     --data_path $DATA_PATH \
-    --eval_data_path $VAL_PATH \
+    --eval_path $VAL_PATH \
     --image_folder $IMAGE_FOLDER \
     --output_dir $OUTPUT_DIR \
     --freeze_vision_tower True \
