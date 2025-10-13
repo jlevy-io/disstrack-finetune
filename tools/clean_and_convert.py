@@ -266,7 +266,7 @@ Deliver a devastating one-liner like a standup comedian."""
     
     sample_count = min(15, len(train_data))
     for i, sample in enumerate(random.sample(train_data, sample_count), 1):
-        roast = sample['conversations'][2]['value']
+        roast = sample['conversations'][1]['value']
         print(f"{i}. {roast}\n")
     
     print(f"{'='*70}\n")
