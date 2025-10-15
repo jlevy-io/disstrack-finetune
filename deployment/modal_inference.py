@@ -21,7 +21,7 @@ from datetime import datetime
 # Configuration
 # ==========================================
 
-MODEL_ID = "jasonlevy/roastme-model-v1"
+MODEL_ID = "jasonlevy/roastme-model-v2"
 GPU_CONFIG = "H100"
 SCALEDOWN_WINDOW = 300
 CACHE_DIR = "/cache"
