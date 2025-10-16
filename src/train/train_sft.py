@@ -2,6 +2,8 @@ import os
 import torch
 from peft import LoraConfig, get_peft_model
 import ast
+import json
+from pathlib import Path
 from transformers import AutoProcessor, BitsAndBytesConfig, Qwen2VLForConditionalGeneration, HfArgumentParser, Qwen2_5_VLForConditionalGeneration
 from src.trainer import QwenSFTTrainer
 from src.dataset import make_supervised_data_module
@@ -17,6 +19,30 @@ local_rank = None
 def rank0_print(*args):
     if local_rank == 0 or local_rank == '0' or local_rank is None:
         print(*args)
+
+def detect_model_version(model_id: str) -> bool:
+    """
+    Detect if model is Qwen2.5 by checking model_id string or config.json
+    
+    Returns:
+        bool: True if Qwen2.5, False if Qwen2
+    """
+    if "Qwen2.5" in model_id:
+        return True
+    
+    config_path = Path(model_id) / "config.json"
+    if config_path.exists():
+        try:
+            with open(config_path) as f:
+                config = json.load(f)
+            architectures = config.get("architectures", [])
+            if architectures and "Qwen2_5" in architectures[0]:
+                rank0_print(f"Detected Qwen2.5 model from config.json: {architectures[0]}")
+                return True
+        except Exception as e:
+            rank0_print(f"Warning: Could not read config.json: {e}")
+    
+    return False
 
 def find_target_linear_names(model, num_lora_modules=-1, lora_namespan_exclude=[], verbose=True):
     linear_cls = torch.nn.modules.Linear
@@ -46,7 +72,6 @@ def configure_vision_tower(model, training_args, compute_dtype, device):
     vision_model_params = model.visual.parameters()
     set_requires_grad(vision_model_params, not training_args.freeze_vision_tower)
     
-    # Handle merger specifically
     merger_params = model.visual.merger.parameters()
     set_requires_grad(merger_params, not training_args.freeze_merger)
 
@@ -77,18 +102,16 @@ def train():
     
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     use_liger = training_args.use_liger
-    if "Qwen2.5" in model_args.model_id:
-        # monkey patch the vision model
+    
+    is_qwen25 = detect_model_version(model_args.model_id)
+    
+    if is_qwen25:
         replace_qwen2_5_vision()
-        # It monkey patches the forward to handle mixed modality inputs.
         replace_qwen2_5_with_mixed_modality_forward()
-        # This is becuase mixed-modality training monkey-patches the model forward method.
         if use_liger:
             apply_liger_kernel_to_qwen2_5_vl()
     else:
-        # It monkey patches the forward to handle mixed modality inputs.
         replace_qwen_2_with_mixed_modality_forward()
-        # This is becuase mixed-modality training monkey-patches the model forward method.
         if use_liger:
             apply_liger_kernel_to_qwen2_vl()
     
@@ -133,7 +156,7 @@ def train():
             )
         ))
 
-    if "Qwen2.5" in model_args.model_id:
+    if is_qwen25:
         model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
             model_args.model_id,
             dtype=compute_dtype,
@@ -189,11 +212,6 @@ def train():
         rank0_print("Adding LoRA to the model...")
         model = get_peft_model(model, peft_config)
 
-        # Peft maodel makes vision tower and merger freezed again.
-        # Configuring fuction could be called here, but sometimes it does not work properly.
-        # So I just made it this way.
-        # Need to be fixed in the future.
-
         if not training_args.freeze_vision_tower:
             for name, param in model.named_parameters():
                 if "visual" in name:
@@ -205,8 +223,6 @@ def train():
                     param.requires_grad = True
 
     processor = AutoProcessor.from_pretrained(model_args.model_id)
-
-    # model.config.tokenizer_model_max_length = processor.tokenizer.model_max_length
 
     if training_args.bits in [4, 8]:
         from peft.tuners.lora import LoraLayer
@@ -258,7 +274,6 @@ def train():
             torch.save(non_lora_state_dict, os.path.join(training_args.output_dir, "non_lora_state_dict.bin"))
     else:
         safe_save_model_for_hf_trainer(trainer, output_dir=training_args.output_dir)
-
 
 
 if __name__ == "__main__":
