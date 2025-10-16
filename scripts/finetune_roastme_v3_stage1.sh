@@ -12,7 +12,7 @@ BASE_MODEL="Qwen/Qwen2.5-VL-7B-Instruct"
 DATA_PATH="data/llava_format/stage1_text_only.json"
 STAGE1_DIR="outputs/roastme-v3-stage1"
 
-BATCH_PER_DEVICE=16
+BATCH_PER_DEVICE=32
 GRAD_ACCUM=4
 GLOBAL_BATCH=$((BATCH_PER_DEVICE * GRAD_ACCUM))
 

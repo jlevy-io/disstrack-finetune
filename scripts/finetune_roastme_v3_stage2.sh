@@ -14,8 +14,8 @@ VAL_PATH="data/llava_format/val.json"
 IMAGE_FOLDER="data/raw/images"
 STAGE2_DIR="outputs/roastme-v3-stage2"
 
-BATCH_PER_DEVICE=2
-GRAD_ACCUM=8
+BATCH_PER_DEVICE=4
+GRAD_ACCUM=4
 GLOBAL_BATCH=$((BATCH_PER_DEVICE * GRAD_ACCUM))
 
 export PYTHONPATH=src:$PYTHONPATH
@@ -96,7 +96,7 @@ deepspeed src/train/train_sft.py \
     --warmup_ratio 0.03 \
     --lr_scheduler_type "cosine" \
     --image_min_pixels $((256 * 28 * 28)) \
-    --image_max_pixels $((768 * 28 * 28)) \
+    --image_max_pixels $((1024 * 28 * 28)) \
     --max_seq_length 2048 \
     --bf16 True \
     --fp16 False \
