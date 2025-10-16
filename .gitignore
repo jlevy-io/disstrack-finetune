@@ -173,12 +173,9 @@ testing.ipynb
 # DissTrack-specific ignores
 # ========================================
 
+evaluation_results/
 # Data - images and datasets (too large for git)
-data/raw/images/*.jpg
-data/raw/images/*.png
-data/raw/images/*.jpeg
-data/raw/*.jsonl
-data/raw/*.json
+data/
 *.db
 
 # Keep directory structure but ignore all image content
